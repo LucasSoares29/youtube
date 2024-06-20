@@ -101,7 +101,7 @@ if option.upper() == "Y":
     elif audio_channels == 6.0:
         cmd += "--audio-codec aac --audio-bitrate 384 --audio-stream 5.1 "
 
-    cmd += f"--log-level output=error -i {nome_video}.mp4 -o converted_{nome_video}.mp4"
+    cmd += f" -i {nome_video}.mp4 -o converted_{nome_video}.mp4"
 
     print("COMEÇANDO CONVERSÃO DO VIDEO PARA ADOBE PREMIERE (HEVC).......")
     os.system(cmd)
