@@ -1,0 +1,7 @@
+pandas
+unidecode
+yt_dlp
+streamlit
+ffmpeg-python
+nicegui
+pywebview
