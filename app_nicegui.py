@@ -18,6 +18,8 @@ https://www.youtube.com/watch?v=yB1e4DEpu5o
 não detecta lives
 https://youtube.com/live/XXEEi31-l00
 
+nao usar chamada de cmd para coletar informações do video. olhar teste-ytdlp.py
+
 """
 # Expressão regular para validar URLs de vídeos do YouTube
 YOUTUBE_REGEX = re.compile(
