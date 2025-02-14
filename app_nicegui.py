@@ -10,12 +10,14 @@ from yt_dlp import YoutubeDL
 from nicegui import app, ui
 
 """
-Verificar casos dde não baixar youtube premium
+videos do youtube 1080p premium nao tem informação sobre tamanho do video
+tamanho do video = duração * bitrate do video
+como conseguir duração???
 https://www.youtube.com/watch?v=yB1e4DEpu5o
 
-Nao tira os pontos finais: https://www.youtube.com/watch?v=mbd5QaouxAo [ok]
+não detecta lives
+https://youtube.com/live/XXEEi31-l00
 
-colocar run_ffmpeg em uma thread (a mesma do download de video e audio) talvez... 
 """
 # Expressão regular para validar URLs de vídeos do YouTube
 YOUTUBE_REGEX = re.compile(
@@ -28,6 +30,20 @@ chosen_id_audio = -1
 chosen_id_video = -1
 nome_video = ""
 chosen_audio_codec = ""
+
+global download_button
+
+def ensure_downloaded_folder():
+    """
+    Verifica se a pasta de download existe. Se não existir, cria a pasta.
+    """
+    current_directory = os.path.dirname(os.path.abspath(__file__))
+
+    if not os.path.exists(os.path.join(current_directory, "downloaded")):
+        os.makedirs(os.path.join(current_directory, "downloaded"))
+        print(f"Pasta criada: {os.path.join(current_directory, 'downloaded')}")
+    else:
+        print(f"A pasta já existe: {os.path.join(current_directory, 'downloaded')}")
 
 def carregarTabela(video_url):
     """
@@ -121,13 +137,12 @@ def run_ffmpeg(video_input, audio_input, output_file):
         input_a = ffmpeg.input(audio_input)
         output_file += ".mp4"
         ffmpeg.output(input_v, input_a, output_file, c="copy").run(overwrite_output=True)
-        # st.success("Vídeo finalizado com sucesso!")
+        print("Processamento do video finalizado")
 
-        # Apagando arquivo temporário
-        current_path = os.path.dirname(os.path.abspath(__file__))
-        path_video = os.path.join(current_path, f"video_{nome_video}.{chosen_codec}")
-        path_audio = os.path.join(current_path, f"audio_{nome_video}.{chosen_audio_codec}")
+        path_video = f"./downloaded/video_{nome_video}.{chosen_codec}"
+        path_audio = f"./downloaded/audio_{nome_video}.{chosen_audio_codec}"
 
+        # apaga arquivos baixados
         if os.path.exists(path_video):
             os.remove(path_video)
         if os.path.exists(path_audio):
@@ -140,6 +155,7 @@ def load_youtube_player(video_id):
     Função para carregar o player do YouTube
     Parâmetro de entrada: video_id (String)
     """
+    print(video_id)
     embed_url = f'https://www.youtube.com/embed/{video_id}'
     ui.html(f'<iframe width="640" height="360" src="{embed_url}" frameborder="0" allowfullscreen></iframe>')
     
@@ -206,29 +222,45 @@ def carregarTabelaAudio(df_tabela_info):
 
     return tabela_formatos_audio[colunas_filtro_audio]
 
-
 def my_hook(d):
-    if d['status'] == 'downloading':
-        percent = round(d['downloaded_bytes'] / d['total_bytes'], 2)
-        if progress_bar:
-            progress_bar.set_value(f"{percent}")
-            label.set_text(f'Downloading video... {percent*100:.2f}%')
-    else:
-        label.set_text(f'Downloading video complete!')
+    """
+    Atualiza barra de progresso do download do video
+    """
+    try:
+        if d['status'] == 'downloading':
+            percent = float(d['downloaded_bytes'] / d['total_bytes'])
+            if progress_bar:
+                progress_bar.set_value(f"{percent}")
+                label.set_text(f'Downloading video... {percent*100:.2f}%')
+        else:
+            label.set_text(f'Downloading video complete!')
+    except KeyError:
+        # No caso dos videos premium que nao tem o tamanho do video
+        if d['status'] == 'downloading':
+            label.set_text(f'Downloading video...')
+        else:
+            progress_bar.set_value(1.0)
+            label.set_text(f'Downloading video complete!')
 
 def my_hook_audio(d):
-    if d['status'] == 'downloading':
+    """
+    Atualiza barra de progresso do download do áudio
+    """
+    try:
+        if d['status'] == 'downloading':
+            label_audio.set_text(f'Downloading audio...')
+            percent_audio = float(d['downloaded_bytes'] / d['total_bytes'])
+            if progress_bar_2:
+                progress_bar_2.set_value(f"{percent_audio}")
+                label_audio.set_text(f'Downloading audio... {percent_audio*100:.2f}%')
+        else:
+            label_audio.set_text(f'Downloading audio complete!')
+    except KeyError:
+        # Caso não tenha tamanho do audio
         label_audio.set_text(f'Downloading audio...')
-        percent_audio = round(d['downloaded_bytes'] / d['total_bytes'], 2)
-        if progress_bar_2:
-            progress_bar_2.set_value(f"{percent_audio}")
-            label_audio.set_text(f'Downloading audio... {percent_audio*100:.2f}%')
-    else:
-        label_audio.set_text(f'Downloading audio complete!')
-
-def reload_app():
-    sys.exit()
-    os.execv(sys.executable, ['python'] + sys.argv) 
+        if d['status'] != 'downloading':
+            progress_bar.set_value(1)
+            label.set_text(f'Downloading audio complete!')
     
 def download_video(video_url, chosen_id_video, chosen_codec, chosen_id_audio, chosen_audio_codec):
     """
@@ -240,8 +272,9 @@ def download_video(video_url, chosen_id_video, chosen_codec, chosen_id_audio, ch
     """
 
 
-    ui.notify("You clicked me!!")
+    ui.notify("Começando o download...")
     global percent, label, spinner, progress_bar, spinner_audio, label_audio, progress_bar_2, percent_audio
+    download_button.set_enabled(False)
     percent = 0
     percent_audio = 0
 
@@ -257,7 +290,7 @@ def download_video(video_url, chosen_id_video, chosen_codec, chosen_id_audio, ch
                 
                 options = {
                     'format': f"{chosen_id_audio}",  # Define o formato desejado (apenas o vídeo)
-                    'outtmpl': f"audio_{nome_video}.{chosen_audio_codec}",  # Define o nome do arquivo de saída
+                    'outtmpl': f"./downloaded/audio_{nome_video}.{chosen_audio_codec}",  # Define o nome do arquivo de saída
                     'quiet': True,  # Para suprimir a saída no console (opcional)
                     'progress_hooks': [my_hook_audio]
                 }
@@ -265,12 +298,18 @@ def download_video(video_url, chosen_id_video, chosen_codec, chosen_id_audio, ch
                 yt = YoutubeDL(options)
                 yt.download(video_url)
                 yt.close() # fecho o youtube-dl
+
+                # Processa o video
+                run_ffmpeg(video_input=f"./downloaded/video_{nome_video}.{chosen_codec}",
+                           audio_input=f"./downloaded/audio_{nome_video}.{chosen_audio_codec}",
+                           output_file=f"./downloaded/{nome_video}")
+
                 stop_event.set()
 
 
             options = {
                 'format': f"{chosen_id_video}",  # Define o formato desejado (apenas o vídeo)
-                'outtmpl': f"video_{nome_video}.{chosen_codec}",  # Define o nome do arquivo de saída
+                'outtmpl': f"./downloaded/video_{nome_video}.{chosen_codec}",  # Define o nome do arquivo de saída
                 'quiet': True,  # Para suprimir a saída no console (opcional)
                 'progress_hooks': [my_hook]
             }
@@ -283,7 +322,6 @@ def download_video(video_url, chosen_id_video, chosen_codec, chosen_id_audio, ch
 
             _download_audio()
 
-        # thread.join()  # Espera a thread finalizar
         print("Thread finalizada.")
 
 
@@ -309,22 +347,23 @@ def download_video(video_url, chosen_id_video, chosen_codec, chosen_id_audio, ch
         
     def check_download():
         if stop_event.is_set():
-            # processamento via ffmpeg
-            ui.label("Processando video... Aguarde!")
-            run_ffmpeg(video_input=f"video_{nome_video}.{chosen_codec}",
-                        audio_input=f"audio_{nome_video}.{chosen_audio_codec}",
-                        output_file=f"{nome_video}")
-            ui.label("Download concluído!")
+            ui.notify("Download concluido!")
             row.set_visibility(False)
-            ui.label("O programa será encerrado em 5s...")
             timer.deactivate()  # Desativa o timer após a primeira execução
-            time.sleep(5)
-            app.shutdown()  # Encerra a aplicação
+            ui.button('restart app', on_click=lambda: os.utime('app_nicegui.py'))
+
+    def check_exists_audio_video():
+        path_video = f"./downloaded/video_{nome_video}.{chosen_codec}"
+        path_audio = f"./downloaded/audio_{nome_video}.{chosen_audio_codec}"
+        if os.path.exists(path_video) and os.path.exists(path_audio):
+            ui.notify("Começando processamento do video")
+            timer2.deactivate()  # Desativa o timer após a primeira execução
+
     
 
     timer = ui.timer(0.5, check_download)  # Verifica a cada 500ms 
+    timer2 = ui.timer(0.5, check_exists_audio_video)  # Verifica a cada 500ms
     
-
 
 def selecting_video_audio_settings_to_download_video():
     """
@@ -374,11 +413,13 @@ def selecting_video_audio_settings_to_download_video():
             print(f"ID de audio escolhido: {chosen_id_audio}")
             print(f"Codec de audio escolhido: {chosen_audio_codec}")
 
+
     url = video_url.value.strip()
 
     match = YOUTUBE_REGEX.match(url)
     
     if match:
+        ensure_downloaded_folder()
         video_id = match.group(4)
         resultado_label.set_text('✅ Link válido: é um vídeo do YouTube!')
         # Carrega o player do YouTube
@@ -398,12 +439,12 @@ def selecting_video_audio_settings_to_download_video():
         select_1 = ui.select(options=resolucoes, 
                              label="Selecione uma resolução",
                              value="Selecione uma resolução",
-                             on_change=lambda event: options_codec(df_video, event))
+                             on_change=lambda event: options_codec(df_video, event)).classes('w-96')
         
         select_2 = ui.select(options=["Selecione uma resolução primeiro"],
                              label="Selecione um codec",
                              value="Selecione uma resolução primeiro",
-                             on_change=lambda event2: on_select_2_change(event2, df_video))
+                             on_change=lambda event2: on_select_2_change(event2, df_video)).classes('w-96')
         
         ui.label("Tabela de informações do audio")
         ui.table.from_pandas(carregarTabelaAudio(tabela_info))
@@ -416,9 +457,10 @@ def selecting_video_audio_settings_to_download_video():
         select_3 = ui.select(options_id_audio, 
                              label="Escolha o ID da qualidade de audio desejada",
                              value="Escolha o ID da qualidade de audio desejada",
-                             on_change=lambda event3: on_select_3_change(event3))
-                
-        ui.button('Download video...', on_click=lambda: download_video(url, chosen_id_video, chosen_codec, chosen_id_audio, chosen_audio_codec))
+                             on_change=lambda event3: on_select_3_change(event3)).classes('w-96')   
+        
+        global download_button
+        download_button = ui.button('Download video...', on_click=lambda: download_video(url, chosen_id_video, chosen_codec, chosen_id_audio, chosen_audio_codec))
     else:
         resultado_label.set_text('❌ Link inválido! Insira um link de vídeo do YouTube.')
 
@@ -432,7 +474,7 @@ ui.markdown('##App YouTube Video Extraction')
 # Create a text input using nicegui for my page
 video_url = ui.input(label='Insira o link do video', 
                      placeholder="Cole um link válido do YouTube",
-                     on_change=selecting_video_audio_settings_to_download_video) # Input para o link do video
+                     on_change=selecting_video_audio_settings_to_download_video).props('rounded standout').classes('w-96') # Input para o link do video
 
 resultado_label = ui.label('')
 
